@@ -1,0 +1,3 @@
+# Keep the verbatim release-notes archive byte-identical to `gh release view`:
+# GitHub release bodies use CRLF line endings, so git must not convert them.
+release-notes/*.md -text
