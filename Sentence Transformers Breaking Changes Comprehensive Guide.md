@@ -1,16 +1,16 @@
 # Sentence Transformers Breaking Changes Comprehensive Guide
 
-This guide covers every change a program written for **sentence-transformers v5.1.2** (released October 22, 2025) must account for when it upgrades to a later stable release, through **v6.1.0** (released September 18, 2026), the newest release at the time of writing. That spans 15 releases: v5.2.0, v5.2.1, v5.2.2, v5.2.3, v5.3.0, v5.4.0, v5.4.1, v5.5.0, v5.5.1, v5.6.0, v5.6.1, v5.7.0, v6.0.0, v6.0.1 and v6.1.0.
+This guide covers every change a program written for **sentence-transformers v5.1.2** (released October 22, 2025) must account for when it upgrades to a later stable release, through **v6.2.0** (released October 21, 2026), the newest release at the time of writing. That spans 16 releases: v5.2.0, v5.2.1, v5.2.2, v5.2.3, v5.3.0, v5.4.0, v5.4.1, v5.5.0, v5.5.1, v5.6.0, v5.6.1, v5.7.0, v6.0.0, v6.0.1, v6.1.0 and v6.2.0.
 
 Most of the risk is concentrated in two releases. **v5.4.0** restructured the package and rebuilt `CrossEncoder`; its notes say existing code keeps working "with warnings at worst", but several common patterns fail or silently change. **v6.0.0** raised the dependency floors to transformers v5, huggingface-hub v1 and torch 2.2, and requires `trust_remote_code=True` for custom module classes. If you are short on time, start with the [Quick Reference](#quick-reference-most-likely-breakage-points-when-upgrading-from-v512).
 
 ## How this guide is verified
 
-Audited on **2026-10-02** against the released source of every tag from v5.1.2 to **v6.1.0**.
+Audited on **2026-10-21** against the released source of every tag from v5.1.2 to **v6.2.0**.
 
 - **Leads, not proof.** Release notes (archived verbatim in [`release-notes/`](release-notes/)), the project's `docs/migration_guide.md`, PR descriptions and deprecation messages were used only to find candidate changes.
 - **Source at both tags.** Every change was located in the code of the release it is attributed to (file and line) and the old code was confirmed at the previous tag. Every consecutive pair of tags was diffed (`pyproject.toml`, `__init__.py`, module layout, public signatures, training arguments, losses, evaluators, `docs/migration_guide.md`) to find changes the notes do not mention.
-- **Run where reading wasn't enough.** Exception types and messages, warning text, outputs and defaults were checked by running the published packages in throwaway CPU environments with tiny models, mostly with both transformers 4.57 (the last version v5.1.2 allows) and transformers 5.18 (the newest). Error and warning messages are quoted from those runs. The Before/After snippets are based on those runs, and every import line in them was executed: Before imports on v5.1.2, After imports on v6.1.0.
+- **Run where reading wasn't enough.** Exception types and messages, warning text, outputs and defaults were checked by running the published packages in throwaway CPU environments with tiny models, mostly with both transformers 4.57 (the last version v5.1.2 allows) and transformers 5.18 (the newest). Error and warning messages are quoted from those runs. The Before/After snippets are based on those runs, and every import line in them was executed: Before imports on v5.1.2, After imports on v6.1.0 and again on v6.2.0 (with huggingface-hub 2.2, where only `import httpx` fails; see [`util.http_get`](#utilhttp_get-uses-httpx-v522)). The v6.2.0 entries were checked with transformers 5.20 and huggingface-hub 2.2 (the newest that v6.2.0 allows) and, for comparison, the same scripts on v6.1.0 and v5.1.2.
 - **Second audit.** After the draft was written, a separate, independent audit re-checked every claim against the code and by running it, without relying on the first pass; everything it confirmed has been corrected.
 - **Attribution.** Each change is attributed to the first release whose code contains it. Where the release notes say otherwise, the entry says so ("Notes vs. code").
 - **Limits.** A few behaviors need GPUs (flash attention, multi-GPU training) or optional services (Qdrant, Seismic); those are marked as verified from the code only, or attributed to the PR author. PyPI matches the tags for every release in the range, and no release is yanked.
@@ -20,11 +20,11 @@ Audited on **2026-10-02** against the released source of every tag from v5.1.2 t
 Each entry gives the first release whose code contains the change, the pull request, and the impact:
 
 - **hard error**: code that worked on v5.1.2 raises;
-- **deprecation warning**: the old form still works and warns (the entry says until when; "still works in v6.1.0" means no removal has happened yet);
+- **deprecation warning**: the old form still works and warns (the entry says until when; "still works in v6.1.0" means no removal has happened yet; v6.2.0 removed none of these deprecated forms);
 - **silent change**: no error, but outputs, training or saved files differ;
 - **additive**: new, optional functionality.
 
-"Before" code works on v5.1.2; "After" code is for the release that made the change and, unless the entry says otherwise, also works on v6.1.0. Import paths in the After blocks use the post-v5.4.0 module layout; the old paths still work with a `DeprecationWarning` (see [import paths](#import-paths-moved-old-paths-still-work-with-a-deprecationwarning-v540)).
+"Before" code works on v5.1.2; "After" code is for the release that made the change and, unless the entry says otherwise, also works on v6.2.0. Statements such as "still the case in v6.1.0" were written before v6.2.0; where v6.2.0 changed the behavior, the entry says so. Import paths in the After blocks use the post-v5.4.0 module layout; the old paths still work with a `DeprecationWarning` (see [import paths](#import-paths-moved-old-paths-still-work-with-a-deprecationwarning-v540)).
 
 ## Contents
 
@@ -46,27 +46,28 @@ Each entry gives the first release whose code contains the change, the pull requ
 
 ## Installation and dependencies
 
-The dependency picture moved twice: v5.2.0 widened the `transformers` cap to `<6`, so fresh installs started pulling transformers v5; v6.0.0 then made transformers v5, huggingface-hub v1 and torch 2.2 hard floors.
+The dependency picture moved three times: v5.2.0 widened the `transformers` cap to `<6`, so fresh installs started pulling transformers v5; v6.0.0 then made transformers v5, huggingface-hub v1 and torch 2.2 hard floors; v6.2.0 lets huggingface-hub 2.x in.
 
-| Requirement | v5.1.2 (baseline) | v5.7.0 (last 5.x) | v6.0.0 / v6.1.0 |
-|---|---|---|---|
-| Python (`requires-python`) | `>=3.9` | `>=3.10` | `>=3.10` |
-| `transformers` | `>=4.41.0,<5.0.0` | `>=4.41.0,<6.0.0` | `>=5.0.0,<6.0.0` |
-| `huggingface-hub` | `>=0.20.0` | `>=0.23.0` | `>=1.3.0,<2.0.0` |
-| `torch` | `>=1.11.0` | `>=1.11.0` | `>=2.2` |
-| `numpy` | not declared | `>=1.20.0` | `>=1.24.0` |
-| `scikit-learn` | unpinned | `>=0.22.0` | `>=1.1.0` |
-| `scipy` | unpinned | `>=1.0.0` | `>=1.0.0` |
-| `tokenizers` | not declared | `>=0.19` | `>=0.19` |
-| `typing_extensions` | `>=4.5.0` | `>=4.5.0` | `>=4.10.0` |
-| `tqdm` | unpinned | `>=4.0.0` | `>=4.0.0` |
-| `Pillow` | core dependency | `image` extra (`transformers[vision]`) | `image` extra (`transformers[vision]`) |
-| `train` extra | `datasets`, `accelerate>=0.20.3` | `datasets>=2.0.0`, `accelerate>=0.20.3` | `datasets>=2.16.0`, `accelerate>=1.3.0` |
-| `onnx` / `onnx-gpu` extra | `optimum[onnxruntime]>=1.23.1` | `optimum-onnx[onnxruntime]` | `optimum-onnx[onnxruntime]` (cannot currently be installed, see below) |
-| `openvino` extra | `optimum-intel[openvino]>=1.20.0` | `optimum-intel[openvino]` | `optimum-intel[openvino]>=2.0.0` |
-| `audio`, `video` extras | do not exist | `transformers[audio]`, `transformers[video]` | same |
+| Requirement | v5.1.2 (baseline) | v5.7.0 (last 5.x) | v6.0.0 / v6.1.0 | v6.2.0 |
+|---|---|---|---|---|
+| Python (`requires-python`) | `>=3.9` | `>=3.10` | `>=3.10` | `>=3.10` (3.14 classifier added) |
+| `transformers` | `>=4.41.0,<5.0.0` | `>=4.41.0,<6.0.0` | `>=5.0.0,<6.0.0` | `>=5.0.0,<6.0.0` |
+| `huggingface-hub` | `>=0.20.0` | `>=0.23.0` | `>=1.3.0,<2.0.0` | `>=1.3.0,<3.0.0` |
+| `torch` | `>=1.11.0` | `>=1.11.0` | `>=2.2` | `>=2.2` |
+| `numpy` | not declared | `>=1.20.0` | `>=1.24.0` | `>=1.24.0` |
+| `scikit-learn` | unpinned | `>=0.22.0` | `>=1.1.0` | `>=1.1.0` |
+| `scipy` | unpinned | `>=1.0.0` | `>=1.0.0` | `>=1.0.0` |
+| `tokenizers` | not declared | `>=0.19` | `>=0.19` | `>=0.19` |
+| `typing_extensions` | `>=4.5.0` | `>=4.5.0` | `>=4.10.0` | `>=4.10.0` |
+| `tqdm` | unpinned | `>=4.0.0` | `>=4.0.0` | `>=4.0.0` |
+| `Pillow` | core dependency | `image` extra (`transformers[vision]`) | `image` extra (`transformers[vision]`) | same |
+| `train` extra | `datasets`, `accelerate>=0.20.3` | `datasets>=2.0.0`, `accelerate>=0.20.3` | `datasets>=2.16.0`, `accelerate>=1.3.0` | same |
+| `onnx` / `onnx-gpu` extra | `optimum[onnxruntime]>=1.23.1` | `optimum-onnx[onnxruntime]` | `optimum-onnx[onnxruntime]` (cannot currently be installed, see below) | same |
+| `openvino` extra | `optimum-intel[openvino]>=1.20.0` | `optimum-intel[openvino]` | `optimum-intel[openvino]>=2.0.0` | same |
+| `audio`, `video` extras | do not exist | `transformers[audio]`, `transformers[video]` | same | same |
+| `merge` extra | does not exist | does not exist | does not exist | `mergekit>=0.1.5` |
 
-Every row above was read from `pyproject.toml` at the tags, and the PyPI metadata of every release from 5.1.2 to 6.1.0 matches its tag. No release in the range is yanked.
+Every row above was read from `pyproject.toml` at the tags, and the PyPI metadata of every release from 5.1.2 to 6.2.0 matches its tag. No release in the range is yanked.
 
 ### Python 3.10 or newer is required (v5.2.0)
 
@@ -190,7 +191,7 @@ v6.0.0 raised the floors in the table at the top of this section (`transformers>
 - With such a pin and an *unversioned* `pip install -U sentence-transformers`, pip silently installs 5.7.0 instead.
 - There is no runtime version check: a forced `--no-deps` install of 6.0.0 on transformers 4.57 still imports and encodes; only `pip check` reports the mismatch. That combination is unsupported.
 
-**Notes vs. code:** the v6.0 section of the project's migration guide omits the `typing_extensions>=4.10.0` and `optimum-intel[openvino]>=2.0.0` floors that the code and the release notes have. `huggingface_hub` 2.x is out, but 6.1.0 caps it below 2.0, so 1.33.0 is the newest that installs.
+**Notes vs. code:** the v6.0 section of the project's migration guide omits the `typing_extensions>=4.10.0` and `optimum-intel[openvino]>=2.0.0` floors that the code and the release notes have. `huggingface_hub` 2.x is out, but 6.0.x and 6.1.0 cap it below 2.0, so 1.33.0 is the newest that installs with them; v6.2.0 raises the cap (see [the next entry](#huggingface-hub-2x-is-allowed-and-brings-httpx2-instead-of-httpx-v620)).
 
 Before (v5.1.2):
 ```text
@@ -211,6 +212,30 @@ huggingface-hub>=1.3.0,<2.0.0
 torch>=2.2
 accelerate>=1.3.0
 datasets>=2.16.0
+```
+
+### huggingface-hub 2.x is allowed and brings `httpx2` instead of `httpx` (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4003, https://github.com/huggingface/sentence-transformers/pull/4162, https://github.com/huggingface/sentence-transformers/pull/3776 · **Impact:** silent dependency upgrade; hard error for code that imports `httpx` directly
+
+v6.2.0 raises the huggingface-hub cap from `<2.0.0` to `<3.0.0`, adds a Python 3.14 classifier (`requires-python` stays `>=3.10`) and adds a `merge` extra (`mergekit>=0.1.5`, used by the new `merge()` classmethods). No other runtime dependency or user-facing extra changed (only the `dev` extra gained test tools).
+
+**What happens:**
+- An unconstrained `pip install -U sentence-transformers` now installs huggingface-hub 2.x (2.2.0 at the time of writing). huggingface-hub 2.x depends on `httpx2`, not `httpx`, so `httpx` is no longer installed unless something else requires it: in a fresh `sentence-transformers[train]==6.2.0` environment `import httpx` raises `ModuleNotFoundError: No module named 'httpx'`.
+- Sentence Transformers now takes its HTTP library from `huggingface_hub.utils.httpx` (present in hub 1.33 and 2.2; a code comment says from 1.31) and falls back to `import httpx`. With hub 2.x that is `httpx2`, so `util.http_get` raises `httpx2.HTTPStatusError`, which `except httpx.HTTPStatusError` does not catch (see [`util.http_get`](#utilhttp_get-uses-httpx-v522)).
+- With huggingface-hub 1.26 or newer (per the release notes; `huggingface_hub.resolve_revision` exists in 1.33 and 2.2), loading a model from the Hub resolves the branch or tag to one commit before downloading its files (https://github.com/huggingface/sentence-transformers/pull/3890). Loading from local directories is unchanged. A missing revision still raises; a missing or inaccessible repository is retried from the local cache; an unreachable Hub with nothing cached falls back silently; any other failure logs `Could not resolve the revision of '<name>' (<error>). Loading without pinning to a single commit.` and loads as before.
+
+Before (v6.1.0):
+```text
+# requirements.txt
+sentence-transformers==6.1.0     # huggingface-hub 1.x, which depends on httpx
+```
+
+After (v6.2.0), either keep huggingface-hub 1.x or stop relying on httpx being installed:
+```text
+# requirements.txt
+sentence-transformers==6.2.0
+huggingface-hub>=1.3.0,<2.0.0    # optional: keeps httpx; otherwise add httpx yourself if you import it
 ```
 
 ## Model loading and saving
@@ -427,7 +452,7 @@ hidden = model.config.hidden_size            # built in; drop the assignment
 
 **First release:** v5.6.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/3823 · **Impact:** silent change in device placement (multi-GPU)
 
-Previously the backbone was placed according to `model_kwargs={"device_map": ...}` and then the whole model was moved to `device` (or the auto-detected default), which defeated `device_map`. Now, with a `device_map`, the backbone stays where accelerate put it and the other modules follow it. Passing `device` as well logs `` Both `device` and `model_kwargs['device_map']` were provided. `device_map` controls device placement, so the `device` argument is ignored. `` The placement itself was verified from the code only (needs more than one GPU). Applies to all model types.
+Previously the backbone was placed according to `model_kwargs={"device_map": ...}` and then the whole model was moved to `device` (or the auto-detected default), which defeated `device_map`. Now, with a `device_map`, the backbone stays where accelerate put it and the other modules follow it. Passing `device` as well logs `` Both `device` and `model_kwargs['device_map']` were provided. `device_map` controls device placement, so the `device` argument is ignored. `` (from v6.2.0: `` Ignoring `device=cuda:1` because `model_kwargs['device_map']` takes priority. ``). The placement itself was verified from the code only (needs more than one GPU). Applies to all model types.
 
 Before (v5.1.2):
 ```python
@@ -494,9 +519,32 @@ This already matters in practice: on 2026-08-31 `lightonai/ColBERT-Zero`, `ColBE
 
 **Notes vs. code:** the v6.0.0 notes list "cross-family conversion no longer inherits inference settings" among the breaking changes. Compared with v5.7.0 nothing changed: the inheriting code existed only on the unreleased development branch, and converting checkpoints gave identical settings on v5.7.0 and v6.0.0. Only the log level changed. Contrary to the notes, `SparseEncoder(<SentenceTransformer checkpoint>)` still inherits the checkpoint's `prompts`, `default_prompt_name` and `similarity_fn_name` on v5.7.0 through v6.1.0 (a code comment says this is intended), so a saved default prompt is still prepended to every `encode`; set `model.default_prompt_name = None` after loading if you don't want that.
 
+### Module paths must stay inside the checkpoint, and `Dense` activation paths must name module classes (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/4175 · **Impact:** hard error for checkpoints with unusual paths
+
+Every `path` in `modules.json` and every module ID in a `Router`'s `config.json` is now checked before anything loads (`util/file_io.py:152`, called from `base/model.py:1340` and `base/modules/router.py:669`). Absolute paths (POSIX or Windows), paths with a `..` component and paths containing a NUL character raise, with or without `trust_remote_code=True`. The `subfolder` and `filename` arguments of `util.load_file_path` and `subfolder` of `util.load_dir_path` are checked the same way. Checkpoints written by `save()` use plain relative names and are unaffected.
+
+`Dense` configs whose activation path starts with `torch.` but does not name a `torch.nn.Module` class (for example a function such as `torch.tanh`) now raise unless the model is trusted. v6.1.0 instantiated the path by calling it without arguments, which fails for such functions anyway; the error type changes.
+
+**What fails:**
+- A `modules.json` entry `"path": "../1_Pooling"` raises `ValueError: Invalid model path '../1_Pooling': expected a relative path without '..' components.` v6.1.0 followed the path out of the model folder.
+- `ValueError: Activation function 'torch.tanh' must be a torch.nn.Module class when trust_remote_code=False.`
+
+Keep every module of a custom checkpoint inside the checkpoint folder and reference it by a relative path such as `"1_Pooling"`.
+
+### New warnings and device handling when loading (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4169, https://github.com/huggingface/sentence-transformers/pull/3986, https://github.com/huggingface/sentence-transformers/pull/4035 · **Impact:** log output; device placement for `device_map` / Accelerate-dispatched models
+
+- A model whose weights end up in float16 or bfloat16 on CPU without an explicit `dtype`/`torch_dtype` in `model_kwargs` or `config_kwargs` logs once: `` This model was loaded in torch.float16 on CPU. Depending on your CPU, inference may be significantly slower than with torch.float32. Consider comparing inference speeds by loading with `model_kwargs={"dtype": torch.float32}`. `` (reproduced by reloading a checkpoint saved in float16). The dtype itself is unchanged.
+- The `device` plus `device_map` warning is reworded (see [`device_map`](#device_map-controls-placement-and-device-is-ignored-when-both-are-given-v560)).
+- For a model loaded with a `device_map` or dispatched with Accelerate hooks, `encode(device=...)`, `predict(device=...)` and the other inference methods no longer move the model: they log `` Ignoring `device=...`, as a device map or Accelerate hooks control this model's placement. ... `` and run where the model is. Calling `model.to(device)`, `.cpu()` or `.cuda()` clears the saved device map; moving a model with weights offloaded to CPU or disk raises `RuntimeError: You can't move a model that has some modules offloaded to cpu or disk.` `start_multi_process_pool()` on an Accelerate-dispatched model raises `ValueError: Multi-process encoding places the model on each target device itself, which a model dispatched by accelerate does not allow. ...`. Verified from the code (`base/model.py:1677-1750`, `:1828`); not run on multiple GPUs.
+- After adding modules to a dispatched model after its first inference call, or changing its Accelerate hooks, call the new `model.clear_placement_cache()`.
+
 ## SentenceTransformer inference
 
-The v5.4.0 notes say "there are no hard deprecations, all existing code should continue to work with warnings at worst." Several common v5.1.2 patterns in this section fail on v5.4.0 and are still broken in v6.1.0: positional constructor arguments, assigning `model.tokenizer`, pandas `Series` inputs and `encode(output_value=None)` on larger batches.
+The v5.4.0 notes say "there are no hard deprecations, all existing code should continue to work with warnings at worst." Several common v5.1.2 patterns in this section fail on v5.4.0 and are still broken in v6.2.0: positional constructor arguments, assigning `model.tokenizer` and pandas `Series` inputs. `encode(output_value=None)` on larger batches was broken from v5.4.0 to v6.1.0 and works again from v6.2.0.
 
 ### Constructor arguments after the model name are keyword-only (v5.4.0)
 
@@ -613,11 +661,13 @@ hf_inputs = {k: v for k, v in features.items() if k in ("input_ids", "attention_
 
 ### `encode(output_value=None)` fails for batches of five or more inputs (v5.4.0)
 
-**First release:** v5.4.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/3554 · **Impact:** hard error (regression, still present in v6.1.0)
+**First release:** v5.4.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/3554 · **Impact:** hard error (regression from v5.4.0 to v6.1.0; fixed in v6.2.0)
 
 With `output_value=None`, `encode` splits each feature per input with `value[idx]` and only catches `TypeError`. The new `"modality": "text"` string is indexable, so input *i* receives `"text"[i]`.
 
 **What fails:** `IndexError: string index out of range` as soon as a batch holds more than four inputs. With four or fewer, each result dict has a junk `"modality"` entry (`'t'`, `'e'`, `'x'`, ...).
+
+**Fixed in v6.2.0** (https://github.com/huggingface/sentence-transformers/pull/4170, listed only under "All Changes"): only tensors whose first dimension is the batch size are split, so six inputs return six dicts and each carries `"modality": "text"` whole. The dicts still contain that extra string key, which v5.1.2 did not have.
 
 Before (v5.1.2):
 ```python
@@ -630,6 +680,11 @@ outs = model.encode(sentences, output_value=None, batch_size=4)   # ignore the "
 # or request what you need separately:
 sentence_emb = model.encode(sentences)
 token_emb = model.encode(sentences, output_value="token_embeddings")
+```
+
+After (v6.2.0):
+```python
+outs = model.encode(sentences, output_value=None)   # works for any batch size; skip the "modality" key
 ```
 
 ### `encode()` rejects pandas Series and non-string items (v5.4.0)
@@ -932,6 +987,34 @@ mask[: int(out[0]["prompt_length"])] = 0      # rebuild it (assumes right paddin
 - Private methods used by some subclasses were renamed or removed: `_text_length`, `_get_prompt_length`, `_load_auto_model`, `_load_sbert_model`, `_encode_multi_process`, `_encode_multi_process_worker` and the `_model_config` attribute. Overrides of these hooks are no longer called.
 - New public API: `modalities`, `supports()`, `preprocess()`, `processor`, `get_embedding_dimension()`, `truncate_embeddings()`.
 
+### KV caching is switched off in the loaded config, and saved `config.json` files say so (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/3992 · **Impact:** silent config change; saved files differ
+
+The `Transformer` module now sets `use_cache = False` on the loaded Hugging Face config and its sub-configs (`base/modules/transformer.py:840`, `:2262`), unless `config_kwargs` sets `use_cache` explicitly. This saves inference memory for decoder models and does not change embeddings. It applies to all four model types. Because `save()` writes that config, a model saved with v6.2.0 has `"use_cache": false` in its `config.json` (v5.1.2 and v6.1.0 wrote `true` for the same test model).
+
+**What changes:** `model[0].auto_model.config.use_cache` is `False` (was `True`), and so is the saved config. That matters only if you use the backbone for generation, for example by loading the saved folder with `AutoModelForCausalLM` and calling `generate()`, which then runs without a KV cache.
+
+Before (v5.1.2):
+```python
+model = SentenceTransformer(name)                      # config.use_cache as in the checkpoint
+```
+
+After (v6.2.0), to keep the old setting:
+```python
+model = SentenceTransformer(name, config_kwargs={"use_cache": True})
+```
+
+### Half-precision mean pooling accumulates in float32; weighted-mean positions start at the first real token (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4106, https://github.com/huggingface/sentence-transformers/pull/4104, https://github.com/huggingface/sentence-transformers/pull/4159 · **Impact:** small silent embedding changes in specific setups
+
+- `Pooling` modes `mean` and `mean_sqrt_len_tokens` sum float16/bfloat16 token embeddings in float32 and cast the result back (`sentence_transformer/modules/pooling.py`), so half-precision models give slightly different, more accurate embeddings. `weightedmean` does the same for its weights. float32 models are unaffected.
+- `weightedmean` position weights now start at 1 at the first non-padding token, so left-padded rows get the same weights as right-padded ones. Right-padding tokenizers are unaffected.
+- On the flattened flash-attention path, `Pooling("cls", include_prompt=False)` with a prompt now skips the prompt tokens, as the padded path has done since v5.5.0 (see [CLS pooling](#cls-pooling-uses-the-first-unmasked-token-v550)).
+
+Re-encode stored corpora only if you need bit-identical vectors from these setups.
+
 ## CrossEncoder
 
 v5.4.0 rebuilt `CrossEncoder` on the same module chain as `SentenceTransformer`. Scores from standard rerankers are unchanged: the tiny test reranker returned identical `predict` output on v5.1.2, v5.4.0 and v6.1.0. Most of the risk is in positional arguments, attributes that used to be plain Hugging Face objects, and custom training code.
@@ -1231,7 +1314,7 @@ scores = model.predict(pairs, convert_to_tensor=True)   # float32, sigmoid compu
 
 Each `"score"` returned by `rank()` is now a Python `float`, so results serialize directly with `json.dumps` (v5 returned `numpy.float32`, which `json.dumps` rejects, or 0-d tensors with `convert_to_tensor=True`). `convert_to_numpy` and `convert_to_tensor` were removed from `rank`'s signature; passing them by keyword is accepted, ignored, and logs `` The CrossEncoder.rank `convert_to_tensor` argument is deprecated and has no effect, as `rank` always returns Python floats. It will be removed in a future version. `` once. `predict` keeps both parameters.
 
-**What fails:** `score.item()`, `score.cpu()` and `torch.stack([r["score"] ...])` raise `AttributeError: 'float' object has no attribute ...` or `TypeError`. Positional arguments past `apply_softmax` now land in `device` and `pool`.
+**What fails:** `score.item()`, `score.cpu()` and `torch.stack([r["score"] ...])` raise `AttributeError: 'float' object has no attribute ...` or `TypeError`. Positional arguments past `apply_softmax` now land in `device` and `pool`. From v6.2.0, `apply_softmax` itself is gone from `rank`'s signature (see [`apply_softmax`](#predictapply_softmaxtrue-no-longer-flattens-single-label-scores-rankapply_softmax-is-deprecated-v620)).
 
 Before (v5.1.2):
 ```python
@@ -1245,6 +1328,34 @@ results = model.rank(query, docs)
 best = results[0]["score"]                                        # already a float
 scores = model.predict([(query, d) for d in docs], convert_to_tensor=True)  # for tensors
 ```
+
+### `predict(apply_softmax=True)` no longer flattens single-label scores; `rank(apply_softmax=...)` is deprecated (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4123, https://github.com/huggingface/sentence-transformers/pull/4138 · **Impact:** silent score change; deprecation warning; hard error for a positional `apply_softmax` in `rank`
+
+For a single-label model (`num_labels=1`), `predict(..., apply_softmax=True)` applied a softmax over a dimension of size 1, so every score came back as `1.0`. v6.2.0 squeezes the scores first and skips the softmax, so you get the normal scores (`cross_encoder/model.py:702`). Multi-label models are unchanged. `rank()` drops `apply_softmax` from its signature: passing it by keyword is accepted, ignored, and logs `` The CrossEncoder.rank `apply_softmax` argument is deprecated and has no effect, as `rank` only supports models with `num_labels=1`. It will be removed in a future version. `` once.
+
+**What changes (tested with `cross-encoder/ms-marco-TinyBERT-L2-v2`):**
+- `predict(pairs, apply_softmax=True)`: `[1. 1.]` on v5.1.2 and v6.1.0, `[-10.84  1.24]` on v6.2.0.
+- `rank(query, docs, apply_softmax=True)`: every score was `1.0` (so the order was meaningless); v6.2.0 logs the warning and returns the real scores in descending order.
+- `rank(query, docs, None, False, None, None, 32, None, None, True)`, with `apply_softmax` passed positionally, now binds `True` to `device` and raises `TypeError: empty(): argument 'device' must be torch.device, not bool`.
+
+Before (v5.1.2):
+```python
+scores = model.predict(pairs, apply_softmax=True)       # all 1.0 for a single-label reranker
+ranked = model.rank(query, docs, apply_softmax=True)
+```
+
+After (v6.2.0):
+```python
+scores = model.predict(pairs)                           # identical to apply_softmax=True on v6.2.0
+ranked = model.rank(query, docs)
+```
+
+Also in v6.2.0:
+- Multi-process `predict` and `rank` re-raise the worker's own exception instead of `RuntimeError: Error in worker process: ...`, and a dead worker raises `RuntimeError: 1 multi-process pool worker(s) died unexpectedly: ...` instead of hanging (https://github.com/huggingface/sentence-transformers/pull/3920, https://github.com/huggingface/sentence-transformers/pull/4146). The same applies to the other model types' `encode`.
+- A `CrossEncoder(..., activation_fn=...)` passed explicitly is no longer resolved against the saved activation first (https://github.com/huggingface/sentence-transformers/pull/4006).
+- Additive, marked experimental: `CrossEncoder(..., keep_in_fp32_modules=["0.model.classifier"])` and `set_keep_in_fp32_modules()` compute selected plain `nn.Linear` layers in float32 (torch backend only), and the selection is saved in `config_sentence_transformers.json` (https://github.com/huggingface/sentence-transformers/pull/4230).
 
 ## SparseEncoder
 
@@ -1357,6 +1468,25 @@ In v5.1.2, `max_active_dims` was passed to both tokenization and the forward pas
 - `semantic_search_qdrant` treats a 1-D sparse query as one query; it used to run one search per vocabulary entry and return that many result lists. `semantic_search_seismic` keeps results in query order and returns `[]` for a query with no matches instead of raising `IndexError`. Neither was run here (qdrant and seismic not installed); verified from the code.
 - `euclidean_sim`, `manhattan_sim`, their pairwise variants and `pairwise_angle_sim` accept a sparse and a dense input together (previously `NotImplementedError` or `RuntimeError`).
 
+### `max_active_dims` is saved with the model (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/4046 · **Impact:** silent change in what reloaded models output
+
+A `max_active_dims` set on the constructor (or found on a `SparseAutoEncoder` module) is now written to `config_sentence_transformers.json` and restored on load, unless the constructor gets its own value (`sparse_encoder/model.py:811`, `:822`). Before, it applied only to the object you created, and a reloaded SPLADE-style model had no limit (models with a `SparseAutoEncoder` already restored its `k`).
+
+**What changes:** `SparseEncoder(name, max_active_dims=8).save(path)` writes `"max_active_dims": 8`, and `SparseEncoder(path)` then keeps at most 8 active dimensions per embedding on v6.2.0. On v6.1.0 the key was not written and the reloaded model returned `None`. Older releases ignore the key when loading such a save. The constructor also rejects non-integer values such as `8.0` or `True` with `ValueError: max_active_dims must be a positive integer, got 8.0.`
+
+Before (v6.1.0 and earlier):
+```python
+model = SparseEncoder(path)                                # no limit, whatever the saving model used
+```
+
+After (v6.2.0), to ignore a saved limit:
+```python
+model = SparseEncoder(path)
+model.max_active_dims = None                               # or pass max_active_dims=... per encode call
+```
+
 ## MultiVectorEncoder
 
 `MultiVectorEncoder` is new in v6.0.0: a fourth model type for ColBERT-style late-interaction retrieval. Nothing in v5.1.2 needs to change because of it. Before v6, these models were used through separate libraries such as PyLate.
@@ -1393,6 +1523,24 @@ model = MultiVectorEncoder("lightonai/ColBERT-Zero")
 print(model.prompts)   # {'query': '[Q] search_query: ', 'document': '[D] search_document: '}
 # reproduce the v6.0.0 behavior, e.g. for a model fine-tuned with 6.0.0:
 legacy = MultiVectorEncoder("lightonai/ColBERT-Zero", prompts={"query": "search_query: ", "document": "search_document: "})
+```
+
+### `HierarchicalTokenPooling` L2-normalizes its output by default (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4008, https://github.com/huggingface/sentence-transformers/pull/3965, https://github.com/huggingface/sentence-transformers/pull/3941 · **Impact:** silent embedding change for newly constructed pooling modules
+
+`HierarchicalTokenPooling` gains `normalize_embeddings`, default `True`: every output token, including the protected ones and tokens that were not merged, is L2-normalized (float16/bfloat16 are normalized in float32 and cast back). It also applies when `pool_factor=1`, which used to be a no-op. Saved configurations without the key load with `normalize_embeddings=False`, so existing checkpoints and indexes keep their behavior (`multi_vector_encoder/modules/token_pooling.py:294`, `:309`). This is the change marked 🚨 in the release notes.
+
+**What changes:** `HierarchicalTokenPooling(pool_factor=2)` built in code (for example as per-call `token_pooling=` for indexing) returns unit-norm cluster means instead of raw means. The new key is saved, so a module saved by v6.2.0 has `"normalize_embeddings": true`, and v6.1.0 fails to load it with `TypeError: HierarchicalTokenPooling.__init__() got an unexpected keyword argument 'normalize_embeddings'`. Also new: fractional `pool_factor` values such as `1.5` are now documented and type-hinted as supported (they already ran on v6.1.0 with the same token counts), and the optional `fastcluster` package speeds up clustering (identical results to scipy except on exact distance ties).
+
+Before (v6.0.0 and v6.1.0):
+```python
+pooling = HierarchicalTokenPooling(pool_factor=2)                              # raw cluster means
+```
+
+After (v6.2.0), to keep the old output:
+```python
+pooling = HierarchicalTokenPooling(pool_factor=2, normalize_embeddings=False)
 ```
 
 ## Modules and import paths
@@ -1586,7 +1734,7 @@ model = SentenceTransformer(modules=[Transformer("openai/clip-vit-base-patch32")
 
 A saved `Dense` module stores its activation as an import path. v5.1.2 imported any path. From v5.4.1, paths outside `torch.` (including legitimate ones such as `transformers.activations.GELUActivation`) are refused unless the model is loaded with `trust_remote_code=True`, and the module falls back to its default `Tanh`.
 
-**What happens:** a WARNING `` Activation function path 'transformers.activations.GELUActivation' is not trusted, falling back to the default activation function (Tanh). Please load the model with `trust_remote_code=True` to allow loading custom activation functions via the configuration. `` and different embeddings. Models whose Dense layers use `torch.nn.*` activations (`Tanh`, `Identity`, `GELU`, ...) are unaffected.
+**What happens:** a WARNING `` Activation function path 'transformers.activations.GELUActivation' is not trusted, falling back to the default activation function (Tanh). Please load the model with `trust_remote_code=True` to allow loading custom activation functions via the configuration. `` and different embeddings. Models whose Dense layers use `torch.nn.*` activations (`Tanh`, `Identity`, `GELU`, ...) are unaffected. From v6.2.0, an untrusted `torch.` path that is not a module class raises `ValueError` instead (see [module path validation](#module-paths-must-stay-inside-the-checkpoint-and-dense-activation-paths-must-name-module-classes-v620)).
 
 Before (v5.1.2):
 ```python
@@ -1624,7 +1772,7 @@ class MyInput(InputModule):
 
 ## Training
 
-The trainers, `*TrainingArguments` and the deprecated `fit()` APIs of v5.1.2 still exist in v6.1.0: `model.fit(train_objectives=[(dataloader, loss)], ...)` and `CrossEncoder.fit(train_dataloader=...)` still train. The three existing `*TrainingArguments` classes have the same 118 fields and defaults in v5.7.0 and v6.0.0 (compared at runtime with transformers 5.18). Training with transformers v5 needs v5.2.3 or later; see [fresh installs of v5.2.x](#fresh-installs-of-v52x-get-transformers-v5-v520).
+The trainers, `*TrainingArguments` and the deprecated `fit()` APIs of v5.1.2 still exist in v6.2.0: `model.fit(train_objectives=[(dataloader, loss)], ...)` and `CrossEncoder.fit(train_dataloader=...)` still train (but see [`fit()` in v6.2.0](#fit-trains-loss-parameters-and-schedules-over-all-objectives-v620)). The three existing `*TrainingArguments` classes have the same 118 fields and defaults in v5.7.0 and v6.0.0 (compared at runtime with transformers 5.18), and the `training_args.py` sources are identical in v6.1.0 and v6.2.0. Training with transformers v5 needs v5.2.3 or later; see [fresh installs of v5.2.x](#fresh-installs-of-v52x-get-transformers-v5-v520).
 
 ### Columns named `labels` or `scores` are treated as labels (v5.2.0)
 
@@ -1874,6 +2022,47 @@ neg_emb = features[2]["sentence_embedding"]
 - Creating `*TrainingArguments` with `dataloader_num_workers > 0` and `dataloader_persistent_workers=False` on Windows or macOS logs a recommendation to enable persistent workers.
 - A column named `id` or ending in `_id`, `_ids` or `_idx` logs that it will be tokenized and trained on as text (v5 did the same silently).
 - When a loss has to embed columns separately, it logs once why it could not merge them.
+
+### `fit()` trains loss parameters and schedules over all objectives (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4066, https://github.com/huggingface/sentence-transformers/pull/4225, https://github.com/huggingface/sentence-transformers/pull/4228 · **Impact:** silent training change for `SentenceTransformer.fit()`
+
+`SentenceTransformer.fit()` (the v2-style API that wraps the trainer) changed in three ways (`sentence_transformer/fit_mixin.py:268-275`, `:339`, `:342`):
+- **Loss parameters are optimized.** The optimizer used to receive only the model's parameters, so a loss with its own weights, such as `SoftmaxLoss`'s classifier, was never updated by `fit()`. In a test with `SoftmaxLoss` the classifier weights stayed identical on v5.1.2 and v6.1.0 and changed on v6.2.0. Losses without parameters are unaffected.
+- **The learning-rate schedule spans all objectives.** With several `train_objectives`, the scheduler length is now `steps_per_epoch * epochs * len(train_objectives)` (or `max_steps` when given), matching the steps actually run; before, it was sized for a single objective, so the learning rate reached the end of its schedule early. With one objective and no `max_steps`, the schedule is unchanged.
+- **DataLoaders with a custom `batch_sampler`** no longer crash; `fit()` logs `` The DataLoader for training objective 1 uses a custom `batch_sampler`, whose batch grouping `fit()` does not preserve. We recommend using `SentenceTransformerTrainer` instead, ... `` and ignores the grouping.
+
+`CrossEncoder.fit()` and `old_fit()` are unchanged.
+
+Before (v5.1.2), a `SoftmaxLoss` head stayed at its random initialization:
+```python
+loss = losses.SoftmaxLoss(model, model.get_sentence_embedding_dimension(), num_labels=3)
+model.fit(train_objectives=[(dataloader, loss)], epochs=1)
+```
+
+After (v6.2.0), the same call also trains `loss.classifier`. To keep the head fixed as before, freeze it:
+```python
+loss = losses.SoftmaxLoss(model, model.get_embedding_dimension(), num_labels=3)
+loss.classifier.requires_grad_(False)
+model.fit(train_objectives=[(dataloader, loss)], epochs=1)
+```
+
+### Batch samplers are seeded with `args.seed` and resample short epochs (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4109, https://github.com/huggingface/sentence-transformers/pull/3946, https://github.com/huggingface/sentence-transformers/pull/4013, https://github.com/huggingface/sentence-transformers/pull/4208, https://github.com/huggingface/sentence-transformers/pull/4002 · **Impact:** silent change in batch composition and order
+
+- **Seed.** The trainers now pass `args.seed` to every per-dataset batch sampler (`base/trainer.py:894`, `:915`); v5.1.2 to v6.1.0 passed it only to the multi-dataset sampler. The `NO_DUPLICATES`, `NO_DUPLICATES_HASHED` and `GROUP_BY_LABEL` samplers reseed their generator with `seed + epoch` every epoch, so before they always shuffled with seed 0 whatever `args.seed` was. With the default `seed=42` the batches of the same script differ from earlier releases, and changing `seed` now changes them. The default `BATCH_SAMPLER` is unaffected.
+- **`NO_DUPLICATES`** (and the hashed variant): when one pass over the data yields fewer batches than `len()` promised (common with `drop_last=True` and many duplicates), it reshuffles and continues for up to two extra passes, so epochs usually reach the advertised length (they can still fall short, with a second warning). The extra batches repeat samples, and a warning is logged once: `NoDuplicatesBatchSampler produced only N of the expected M batches in a full pass over the dataset. ...`.
+- **`GROUP_BY_LABEL`** trims each label to an even count *after* shuffling (before, the same trailing sample of an odd-sized label was always dropped), and avoids putting two pairs of the same label next to each other in a batch.
+- Multi-dataset samplers now pass the epoch on to their per-dataset samplers, and `ROUND_ROBIN` yields complete rounds only.
+
+No code change needed; expect different batches and loss curves when comparing with older runs.
+
+### Evaluators share DDP inference during training (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/4004 · **Impact:** behavior change for multi-GPU (DDP) training with an evaluator
+
+With DDP (not FSDP or DeepSpeed), the trainer now runs the evaluator on rank 0 only, while `encode`, `predict` and `rank` calls made by the evaluator are split across all ranks (`util/distributed.py`, `base/trainer.py:669`). Metrics are broadcast to every rank, and evaluator output files are written once, by rank 0. Under FSDP or DeepSpeed every rank still runs the evaluator, but only rank 0 now receives an `output_path` (the others get `None`). Custom evaluators that run their own collective operations, or that rely on running on every rank, need checking. Calls with arguments that cannot be pickled fall back to rank 0. Verified from the code; not run on multiple GPUs.
 
 ## Losses
 
@@ -2153,12 +2342,35 @@ With hard-negative columns, `num_negatives=None` (or at least the number of cand
 
 - **`AnglELoss`** (v5.3.0, https://github.com/huggingface/sentence-transformers/pull/3609) accepts (anchor, positive, negative, ...) tuples without labels. Pairs without labels raise `ValueError: AnglELoss requires labels for datasets with pairs.` instead of `TypeError`. A 3+ column dataset that also has a label column now uses the extra columns.
 - **`ContrastiveLoss` and `OnlineContrastiveLoss`** (v5.7.0, https://github.com/huggingface/sentence-transformers/pull/3838) emit a one-time `UserWarning` when labels are not 0 or 1. The math is unchanged; this matters under `-W error`.
-- **Loss model-card configs** (v6.0.0, https://github.com/huggingface/sentence-transformers/pull/3794): `MultipleNegativesRankingLoss` (and its cached variant), `MarginMSELoss`, `DistillKLDivLoss` and `ContrastiveTensionLoss` render `similarity_fct` through `util.similarity_fct_name`, so `functools.partial` objects get readable names. For MNRL, a partial raised `AttributeError` in `get_config_dict()` on v5.1.2 to v5.3.0 and was rendered as its raw `repr` on v5.4.0 to v5.7.0. `CoSENTLoss`, `AnglELoss` and `GlobalOrthogonalRegularizationLoss` still raise `AttributeError` for a partial in v6.1.0.
+- **Loss model-card configs** (v6.0.0, https://github.com/huggingface/sentence-transformers/pull/3794): `MultipleNegativesRankingLoss` (and its cached variant), `MarginMSELoss`, `DistillKLDivLoss` and `ContrastiveTensionLoss` render `similarity_fct` through `util.similarity_fct_name`, so `functools.partial` objects get readable names. For MNRL, a partial raised `AttributeError` in `get_config_dict()` on v5.1.2 to v5.3.0 and was rendered as its raw `repr` on v5.4.0 to v5.7.0. `CoSENTLoss`, `AnglELoss` and `GlobalOrthogonalRegularizationLoss` still raise `AttributeError` for a partial in v6.2.0.
 - **New losses** (additive): `GlobalOrthogonalRegularizationLoss` and sparse `CachedSpladeLoss` (v5.3.0), `EmbedDistillLoss` and CrossEncoder `ADRMSELoss` (v5.5.0).
+- **Ranking losses** (v6.2.0): `PListMLELoss`'s default position weights count ranks from 1, so the weights become `2^(n - rank) - 1` with the last position weighted 0 (https://github.com/huggingface/sentence-transformers/pull/4051), and long lists are rescaled to stay finite (https://github.com/huggingface/sentence-transformers/pull/4166); `ListMLELoss`/`PListMLELoss` use log-sum-exp (https://github.com/huggingface/sentence-transformers/pull/4012). `LambdaLoss(k=...)` keeps pairs where either document is in the top k, not only pairs where both are (https://github.com/huggingface/sentence-transformers/pull/4172), computes weighted log-sigmoids directly instead of clamping probabilities (https://github.com/huggingface/sentence-transformers/pull/4116), and returns 0 instead of `nan` when no pair is ordered (https://github.com/huggingface/sentence-transformers/pull/4032). Loss values change for `PListMLELoss` with default weights and for `LambdaLoss` with `k`.
+- **Triplet and contrastive losses** (v6.2.0): the batch triplet losses' default Euclidean distance is computed in float32 for half-precision inputs, `BatchHardSoftMarginTripletLoss` uses `softplus` (no overflow), `BatchSemiHardTripletLoss` and `BatchAllTripletLoss` use far less memory (https://github.com/huggingface/sentence-transformers/pull/4026, https://github.com/huggingface/sentence-transformers/pull/4029), `OnlineContrastiveLoss` now keeps a batch's single hard positive or negative pair, and `GlobalOrthogonalRegularizationLoss` returns 0 instead of `nan` for a batch of one. `CoSENTLoss` and `AnglELoss` score half-precision inputs in float32 and use linear memory (https://github.com/huggingface/sentence-transformers/pull/4030); the release notes say MPS then needs PyTorch 2.9 or newer (not tested here).
+- **`SoftmaxLoss`** (v6.2.0) accepts per-pair class probabilities of shape `(batch, num_labels)` as labels and casts its inputs to the classifier's dtype.
+
+### Label shapes are validated, and `MatryoshkaLoss` no longer truncates token embeddings (v6.2.0)
+
+**First release:** v6.2.0 · **PRs:** https://github.com/huggingface/sentence-transformers/pull/4145, https://github.com/huggingface/sentence-transformers/pull/4173, https://github.com/huggingface/sentence-transformers/pull/4094 · **Impact:** silent loss change for `(n, 1)` labels; hard error for wrong label counts; silent change for token-level losses wrapped in `MatryoshkaLoss`
+
+**Labels.** Losses that take one label per row (`CoSENTLoss`, `AnglELoss`, `CosineSimilarityLoss`, `ContrastiveLoss`, `OnlineContrastiveLoss`, the four `Batch*TripletLoss` classes, and CrossEncoder `BinaryCrossEntropyLoss` and `MSELoss`) now flatten `(n, 1)` label tensors and raise if the number of labels differs from the batch size. CrossEncoder `CrossEntropyLoss` flattens `(n, 1)` integer labels. Before, `(n, 1)` labels (for example from a dataset whose label column holds one-element lists) were broadcast and silently gave a different loss: with the same embeddings and labels, `CoSENTLoss` returned 6.11 on v5.1.2 and v6.1.0 and 3.95 on v6.2.0, and `ContrastiveLoss` 0.273 on v6.1.0 vs. 0.263 on v6.2.0.
+
+**What fails:** `ValueError: CoSENTLoss expects 4 labels (one per example), but got 3 labels with shape (3,).` (v6.1.0 raised a `RuntimeError` about tensor sizes for the same input).
+
+**`MatryoshkaLoss`** truncates only `sentence_embedding` to each Matryoshka dimension; `token_embeddings` stay full-size. This changes training only for wrapped losses that read token embeddings. Teacher labels of shape `(batch, columns, dim)` are now truncated too, not only `(batch, dim)`.
+
+Before (v5.1.2), label column of one-element lists:
+```python
+train_dataset = Dataset.from_dict({"s1": s1, "s2": s2, "label": [[0.3], [0.8]]})   # broadcast silently
+```
+
+After (v6.2.0), the same data is flattened correctly; plain scalars remain the normal form:
+```python
+train_dataset = Dataset.from_dict({"s1": s1, "s2": s2, "label": [0.3, 0.8]})
+```
 
 ## Evaluators
 
-Evaluator class names and returned metric keys are unchanged across the whole range, apart from the `ReciprocalRankFusionEvaluator` primary-metric prefix noted below. Several evaluators changed the *values* they report.
+Evaluator class names and returned metric keys are unchanged across the whole range, apart from the `ReciprocalRankFusionEvaluator` primary-metric prefix and, from v6.2.0, `TripletEvaluator` given only `main_similarity_function`, both noted below. Several evaluators changed the *values* they report.
 
 ### NanoBEIR evaluators take a new second parameter and load from a single dataset repository (v5.2.0)
 
@@ -2262,6 +2474,40 @@ class MyEval(TripletEvaluator):
 
 v5 kept the tied documents with the largest corpus IDs, and which of them survived could also depend on `corpus_chunk_size` boundaries. Ties are now broken by corpus ID (smallest first), so metrics on exact ties (duplicate documents, quantized embeddings) can change even at a fixed chunk size, and no longer depend on it. In a test with exact ties, v5.7.0 gave NDCG@10 between 0.33 and 0.43 depending on the chunk size and v6.0.0 gave 0.33 for every chunk size. Scores that differ only in the last float bit are not ties and can still move. The sparse IR and NanoBEIR evaluators inherit this. Separately, v5.3.0 made `write_predictions=True` create a missing `output_path` instead of raising `FileNotFoundError`.
 
+### `TripletEvaluator(main_similarity_function=...)` evaluates that function, which changes the metric key (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/4088 · **Impact:** silent metric-key and value change
+
+When `main_similarity_function` is given and `similarity_fn_names` is not, the evaluator now evaluates exactly that function (`sentence_transformer/evaluation/triplet.py:130`). Before, it evaluated the model's own similarity function and reported it under that function's name, while `primary_metric` pointed at the requested one.
+
+**What changes:** `TripletEvaluator(anchors, positives, negatives, main_similarity_function="dot", name="t")(model)` on a cosine model returned `{'t_cosine_accuracy': 1.0}` on v5.1.2 and v6.1.0, and returns `{'t_dot_accuracy': 1.0}` on v6.2.0. Code or `metric_for_best_model` settings that read the old key get a `KeyError` or no longer find the metric. `SparseTripletEvaluator` inherits the change.
+
+Before (v5.1.2):
+```python
+ev = TripletEvaluator(anchors, positives, negatives, main_similarity_function="dot", name="t")
+acc = ev(model)["t_cosine_accuracy"]
+```
+
+After (v6.2.0), name the functions you want explicitly:
+```python
+ev = TripletEvaluator(anchors, positives, negatives, main_similarity_function="dot",
+                      similarity_fn_names=["dot"], name="t")
+acc = ev(model)["t_dot_accuracy"]
+```
+
+### Evaluator value fixes (v6.2.0)
+
+**First release:** v6.2.0 · **Impact:** silent metric changes in specific cases
+
+- **`BinaryClassificationEvaluator`**: thresholds are only placed between different scores, the "everything dissimilar" and last-row thresholds are considered too, and F1 is evaluated after each group of tied scores (https://github.com/huggingface/sentence-transformers/pull/4023). Accuracy, F1 and thresholds can change when scores tie or when the best threshold lies at an end. NumPy-array and pandas-`Series` labels work.
+- **`ParaphraseMiningEvaluator`**: tied scores are evaluated as a group and average precision counts each correct pair (https://github.com/huggingface/sentence-transformers/pull/4028); with `add_transitive_closure=True`, only pairs marked as duplicates are followed (https://github.com/huggingface/sentence-transformers/pull/4120); `get_config_dict()` reports the flag's value instead of a function object.
+- **`TranslationEvaluator`**: a match counts as correct when the retrieved sentence has the same text as the expected one, so duplicate sentences no longer count as errors (https://github.com/huggingface/sentence-transformers/pull/4031).
+- **`RerankingEvaluator`** and the sparse variant: a string `positive` or `negative` is one document, not a list of characters (https://github.com/huggingface/sentence-transformers/pull/4164).
+- **`EmbeddingSimilarityEvaluator`** with `precision="int8"`/`"uint8"` calibrates both sides together, and binary precisions work (https://github.com/huggingface/sentence-transformers/pull/4226).
+- **IR, NanoBEIR and sparse IR evaluators** without `score_functions` resolve the model's similarity function on every call, so an evaluator reused for several models no longer keeps the first model's function (https://github.com/huggingface/sentence-transformers/pull/3976). `NanoBEIREvaluator(main_score_function="cosine")` accepts a string (https://github.com/huggingface/sentence-transformers/pull/4034). The sparse IR evaluator uses `corpus_model` and `corpus_embeddings` when given (https://github.com/huggingface/sentence-transformers/pull/4147).
+- **`MSEEvaluator`** raises `ValueError: source_sentences (3) and target_sentences (2) must have the same length.` for unequal lists, and its MSE metric value is a Python float. `SequentialEvaluator` stores its evaluators as a list, so an iterator can be evaluated more than once.
+- CSV files written on Windows by the CrossEncoder and RRF evaluators no longer contain blank rows.
+
 ## Utilities
 
 ### `mine_hard_negatives`: `n-tuple-scores` is deprecated and its column is renamed (v5.2.0)
@@ -2351,11 +2597,36 @@ After (v6.0.0):
 q = np.stack(quantize_embeddings([m1, m2], precision="int8"))   # list -> stack it yourself
 ```
 
+### int8/uint8 quantization of a single embedding raises without calibration (v6.2.0)
+
+**First release:** v6.2.0 · **PR:** https://github.com/huggingface/sentence-transformers/pull/4150 · **Impact:** hard error
+
+Scalar quantization needs per-dimension ranges. Without `ranges` or `calibration_embeddings`, they were computed from the input itself, which for a single embedding is meaningless (every dimension has a zero-width range). v6.2.0 refuses (`util/quantization.py:439`). Two or more embeddings still work, with the existing warning about fewer than 100 embeddings.
+
+**What fails:** `model.encode("hello", precision="int8")`, `model.encode(["hello"], precision="int8")` and `quantize_embeddings(one_vector, precision="uint8")` raise `` ValueError: Cannot compute int8 quantization ranges from a single embedding. Call `quantize_embeddings` with `ranges` or `calibration_embeddings` from a representative set of embeddings instead. `` (`uint8` in the message for uint8). v5.1.2 and v6.1.0 returned an array after a warning (v5.1.2 also emitted `RuntimeWarning: invalid value encountered in divide` for a single string).
+
+Before (v5.1.2):
+```python
+q = model.encode("query text", precision="int8")
+```
+
+After (v6.2.0), quantize float embeddings with ranges from your corpus:
+```python
+from sentence_transformers import quantize_embeddings
+
+ranges = np.vstack([corpus_emb.min(axis=0), corpus_emb.max(axis=0)])   # or calibration_embeddings=corpus_emb
+q = quantize_embeddings(model.encode(["query text"]), precision="int8", ranges=ranges)
+```
+
+The same release fixes scalar-quantized rescoring in `semantic_search_faiss` (`uint8`) and `semantic_search_usearch` (`int8`), which now dequantize candidates with the corpus ranges; pass the same `ranges` or `calibration_embeddings` you used for the corpus (https://github.com/huggingface/sentence-transformers/pull/4058). Binary `usearch` indexes, padding of short `usearch` result lists and the metric of approximate FAISS inner-product indexes are fixed too (https://github.com/huggingface/sentence-transformers/pull/3948, https://github.com/huggingface/sentence-transformers/pull/3956, https://github.com/huggingface/sentence-transformers/pull/4022), and bfloat16 embeddings can be quantized (https://github.com/huggingface/sentence-transformers/pull/4089).
+
 ### `util.http_get` uses `httpx` (v5.2.2)
 
 **First release:** v5.2.2 · **PR:** https://github.com/huggingface/sentence-transformers/pull/3618 · **Impact:** exception type change
 
 `sentence_transformers.util.http_get` (also used by `WordEmbeddings.from_text_file` to download a missing embeddings file by name) switched from `requests` to a lazily imported `httpx`, which is not declared as a dependency (it comes with huggingface-hub 1.x and `datasets`). HTTP errors raise `httpx.HTTPStatusError` instead of `requests.exceptions.HTTPError` (which subclassed `OSError`, so `except OSError` no longer catches them), and without httpx it raises `` ImportError: httpx is required to use this function. Please install it via `pip install httpx`. `` Partial downloads are cleaned up.
+
+From v6.2.0 (https://github.com/huggingface/sentence-transformers/pull/4003) `http_get` takes the HTTP library from `huggingface_hub.utils.httpx` and falls back to `import httpx`, so that `ImportError` is gone. With huggingface-hub 1.x this is `httpx` itself; with huggingface-hub 2.x, which v6.2.0 allows, it is `httpx2`: errors are `httpx2.HTTPStatusError`, which `except httpx.HTTPStatusError` does not catch, and `httpx` may not be installed at all (see [huggingface-hub 2.x](#huggingface-hub-2x-is-allowed-and-brings-httpx2-instead-of-httpx-v620)). The v5.2.2 After block below then fails with `ModuleNotFoundError: No module named 'httpx'`.
 
 Before (v5.1.2):
 ```python
@@ -2375,9 +2646,26 @@ except httpx.HTTPStatusError:
     ...
 ```
 
+After (v6.2.0, any allowed huggingface-hub version), mirroring the library's own fallback:
+```python
+try:
+    from huggingface_hub.utils import httpx   # httpx on recent hub 1.x, httpx2 on hub 2.x
+except ImportError:
+    import httpx                              # older hub 1.x
+
+try:
+    http_get(url, "data.tsv.gz")
+except httpx.HTTPStatusError:
+    ...
+```
+
 ### Other utility changes
 
 - **`community_detection`** (v5.7.0, https://github.com/huggingface/sentence-transformers/pull/3900): similarities exactly equal to the threshold now expand the search window, so communities are no longer capped at about 50 members when many scores tie (120 identical vectors with `threshold=1.0`: one community of 50 before, 120 after).
+- **`community_detection`** (v6.2.0, https://github.com/huggingface/sentence-transformers/pull/3954, https://github.com/huggingface/sentence-transformers/pull/4143, https://github.com/huggingface/sentence-transformers/pull/4065): fewer inputs than `min_community_size` return `[]` (three identical vectors with `min_community_size=10` gave `[[0, 1, 2]]` on v5.1.2 and v6.1.0, `[]` on v6.2.0); a candidate community whose central point was already claimed by a larger community is dropped, and the central point is always listed first; a single 1-D embedding no longer crashes.
+- **`paraphrase_mining`** (v6.2.0, https://github.com/huggingface/sentence-transformers/pull/3930, https://github.com/huggingface/sentence-transformers/pull/3979, https://github.com/huggingface/sentence-transformers/pull/4189): each sentence keeps its `top_k` best partners across all corpus chunks, self-matches are removed before `top_k` is applied, and pairs are deduplicated before the `max_pairs` cap. Results can contain more (and different) pairs than before, and no longer depend on `corpus_chunk_size`.
+- **`semantic_search`** (v6.2.0, https://github.com/huggingface/sentence-transformers/pull/4197): with the default `cos_sim`, each corpus chunk is normalized once; scores are the same up to floating-point rounding. Lists of numpy embeddings and an empty corpus list are accepted.
+- **`mine_hard_negatives`** (v6.2.0, https://github.com/huggingface/sentence-transformers/pull/4073): with a `cross_encoder` and only `min_score` set, candidates are now rescored with the cross-encoder (before, `min_score` was applied to the embedding model's scores and the cross-encoder was not used). A one-column dataset raises `ValueError: Dataset must contain at least two columns to select the positive column automatically.` instead of `IndexError`, the warning about `include_positives=True` also covers `min_score`, `absolute_margin` and `relative_margin`, and the multi-process pool is stopped when mining fails.
 - **`pairwise_angle_sim`** (v5.3.0, https://github.com/huggingface/sentence-transformers/pull/3623) supports odd embedding dimensions (it raised `RuntimeError`).
 - **Generated model cards**: v5.3.0 (https://github.com/huggingface/sentence-transformers/pull/3680) drops a `dataset_name` column from the training-data section and no longer raises `KeyError` with `set_transform`; v6.0.0 changes the default wording from "maps sentences & paragraphs to" to "maps inputs to". Tests that compare generated README text need updating.
 
@@ -2434,6 +2722,8 @@ If your project extends Sentence Transformers rather than just calling it, check
 - **Custom losses**: `MultipleNegativesRankingLoss.cross_entropy_loss` is gone (v5.3.0); the cached losses lost `.cache` and `.random_states`, `calculate_loss_and_cache_gradients` was removed or now returns a tuple, and `calculate_loss` changed (v5.7.0); per-column feature dicts are no longer filled in place by merged forward passes (v6.0.0); CrossEncoder losses must call `model(model.preprocess(pairs))["scores"]` instead of `model(**tokens)` (v5.4.0). See [Losses](#losses).
 - **Custom evaluators**: `TripletEvaluator.embed_inputs` receives `encode_fn_name` from v6.0.0 ([details](#tripletevaluator-encodes-anchors-as-queries-and-validates-its-arguments-v600)).
 - **Custom trainers**: `get_eval_dataloader` receives dataset names from v5.7.0 ([details](#trainer-subclasses-receive-dataset-names-in-get_eval_dataloader-v570)), and the CrossEncoder and SparseEncoder trainers no longer subclass the SentenceTransformer trainer ([details](#crossencoder-and-sparseencoder-trainers-no-longer-subclass-the-sentencetransformer-ones-v540)).
+- **Subclasses that override inference internals** (v6.2.0, verified from the code): `SentenceTransformer`, `SparseEncoder`, `CrossEncoder` and `MultiVectorEncoder` no longer define their own `_multi_process` and `_multi_process_worker`. The shared versions in `BaseModel` call a new `_inference(inputs, device=..., **resolved_kwargs)` method, which `encode`/`predict` also use for single-process inference, and `_multi_process_worker` is now a classmethod. Overrides of the old per-class methods, or of `encode`/`predict` that expect workers to call them, are bypassed. `gradient_checkpointing_enable` now forwards its arguments to every submodule that defines it, with no fallback for a custom module whose `gradient_checkpointing_enable()` takes no arguments (v6.1.0 retried without arguments on `TypeError`).
+- **Custom evaluators under DDP** run on rank 0 only while their inference is shared across ranks (v6.2.0, [details](#evaluators-share-ddp-inference-during-training-v620)).
 - **Code that touches internals**: `model.tokenizer = ...` raises and `model[0].auto_model = ...` is ignored ([details](#modeltokenizer-can-no-longer-be-assigned-and-assigning-auto_model-is-silently-ignored-v540)); `model.tokenize()` output contains a string ([details](#tokenize-is-deprecated-and-its-output-gains-a-modality-string-v540)); `CrossEncoder.config.sentence_transformers` is no longer populated ([details](#crossencoder-is-now-a-module-chain-what-happened-to-its-attributes-v540)).
 - **Remote-code modules**: not a code change, but the v6.1.0 documentation now warns that transformers' static import scan (which applies in every release since v5.1.2) turns unguarded optional imports in custom modules into hard requirements; guard them with `try`/`except`.
 
@@ -2492,7 +2782,7 @@ The large restructure (#3554): a shared `base` package, multimodal inputs, and a
 - Hard errors: keyword-only constructors for `SentenceTransformer`, `SparseEncoder` and `Transformer`; `model.tokenizer` assignment; pandas `Series` and non-string inputs; `{"query": ...}` dict inputs on models without a `Router` (and `{"text": ...}` until v5.5.1); `encode(output_value=None)` on five or more inputs; removed `Pooling`/`LSTM`/`CNN` attributes; `CrossEncoder.set_activation_fn`/`set_config_value`, `model(**tokens)`, `save(**hf_kwargs)`, `push_to_hub(tags=)`; positional `batch_size` in CrossEncoder `predict`/`rank`/evaluators; collator `tokenize_fn`; the default mini-batched `MegaBatchMarginLoss` (`KeyError: 'te'`, until v5.7.0); `SparseEncoder.encode_multi_process`/`fit`/`load` and `max_active_dims=0`; `CLIPModel(model_name=)`; positional `MLMTransformer` arguments; `SparseAutoEncoder.preprocess`.
 - Silent changes: whitespace no longer stripped; `max_seq_length` follows `tokenizer.model_max_length`; `auto_model` assignment ignored; raw causal-LM checkpoints get last-token pooling and a chat template; CrossEncoder rerankers with a chat template get chat-formatted input; raw causal-LM CrossEncoders become generative rerankers; `predict(activation_fn=)` no longer sticks; CrossEncoder positional arguments past the fifth dropped; CrossEncoder training prompts applied; the `TripletLoss` default distance fixed ([details](#tripletloss-with-the-default-euclidean-or-manhattan-distance-was-inverted-until-v540)).
 - Saved models cannot be loaded by v5.3.x or earlier ([details](#models-saved-by-v540-or-later-cannot-be-loaded-by-v53x-or-earlier-v540)).
-- Deprecations still working in v6.1.0: `encode(sentences=)`, `tokenizer_kwargs`, `get_sentence_embedding_dimension`, `truncate_sentence_embeddings`, `tokenize()`, `Transformer`/`Pooling`/`SpladePooling` argument renames, `MLMTransformer`, `CLIPModel`, CrossEncoder `max_length` property, trainer `tokenizer=`.
+- Deprecations still working in v6.2.0: `encode(sentences=)`, `tokenizer_kwargs`, `get_sentence_embedding_dimension`, `truncate_sentence_embeddings`, `tokenize()`, `Transformer`/`Pooling`/`SpladePooling` argument renames, `MLMTransformer`, `CLIPModel`, CrossEncoder `max_length` property, trainer `tokenizer=`.
 - **Notes vs. code:** "there are no hard deprecations, all existing code should continue to work with warnings at worst" is not accurate; see the hard errors above. "`default_activation_function` -> `activation_fn` (with deprecation warning)" is not new: v5.1.2 already accepted `activation_fn` and warned on `default_activation_function`. The `max_length` deprecation applies to the property only, not to the constructor argument.
 
 ### v5.4.1
@@ -2567,7 +2857,7 @@ Major release.
 - `Normalize` moves to `sentence_transformers.base.modules`; models can declare required package versions.
 - `TripletEvaluator` uses `encode_query`/`encode_document` and validates arguments; IR evaluator tie-breaking; `DistillKLDivLoss` validation; MNRL rejects `scale=nan`; merged forward pass for candidate columns; `NO_DUPLICATES_HASHED` works with xxhash 4.
 - New `MultiVectorEncoder`.
-- v6.0.0 removed no API that was deprecated during 5.x: every deprecated form in this guide that still worked on v5.7.0 still works in v6.1.0. (`SparseEncoder.encode_multi_process`, deprecated in v5.0, was already removed in v5.4.0.)
+- v6.0.0 removed no API that was deprecated during 5.x: every deprecated form in this guide that still worked on v5.7.0 still works in v6.1.0 and v6.2.0. (`SparseEncoder.encode_multi_process`, deprecated in v5.0, was already removed in v5.4.0.)
 - **Notes vs. code:** "cross-family conversion no longer inherits inference settings" is not a change from v5.7.0 (only the log level changed). Checkpoint reloading keeps working without the flag only for `Module` subclasses. The v5.6/v5.7 warnings did not cover classes from installed packages referenced by local models, which now raise. The migration guide omits the `typing_extensions>=4.10.0` and `optimum-intel[openvino]>=2.0.0` floors.
 
 ### v6.0.1
@@ -2583,6 +2873,21 @@ Patch release with two behavior changes. `MultiVectorEncoder` combines PyLate `[
 Released 2026-09-18 · [release notes](release-notes/v6.1.0.md)
 
 Minor release with one silent behavior change for chat-template multimodal inputs: content follows each input's own key order, lists under a modality key become separate items, and a list under `"video"` is one video only if every item is recognized as an image ([details](#content-order-lists-and-video-frames-in-chat-template-inputs-v610)). Also fixes `load_audio_from_video` routing. Everything else is docstrings, type annotations and documentation. No dependency, training-argument, loss or evaluator changes.
+
+### v6.2.0
+
+Released 2026-10-21 · [release notes](release-notes/v6.2.0.md)
+
+Minor release with many fixes and several behavior changes. Verified against the v6.2.0 source and by running v5.1.2, v6.1.0 and v6.2.0 side by side.
+
+- huggingface-hub 2.x is allowed, which replaces `httpx` with `httpx2`; new `merge` extra; Python 3.14 classifier ([details](#huggingface-hub-2x-is-allowed-and-brings-httpx2-instead-of-httpx-v620), [`http_get`](#utilhttp_get-uses-httpx-v522)).
+- Hard errors: int8/uint8 quantization of a single embedding, including `encode("text", precision="int8")` ([details](#int8uint8-quantization-of-a-single-embedding-raises-without-calibration-v620)); absolute or `..` module paths in checkpoints, and non-class `torch.` activation paths in `Dense` ([details](#module-paths-must-stay-inside-the-checkpoint-and-dense-activation-paths-must-name-module-classes-v620)); label counts that don't match the batch in most single-label losses ([details](#label-shapes-are-validated-and-matryoshkaloss-no-longer-truncates-token-embeddings-v620)); a positional `apply_softmax` in `CrossEncoder.rank`.
+- Silent changes: `predict(apply_softmax=True)` no longer returns all `1.0` for single-label models, and `rank(apply_softmax=)` is deprecated ([details](#predictapply_softmaxtrue-no-longer-flattens-single-label-scores-rankapply_softmax-is-deprecated-v620)); `use_cache=False` in loaded and saved configs ([details](#kv-caching-is-switched-off-in-the-loaded-config-and-saved-configjson-files-say-so-v620)); `HierarchicalTokenPooling` normalizes by default ([details](#hierarchicaltokenpooling-l2-normalizes-its-output-by-default-v620)); `SparseEncoder` saves `max_active_dims` ([details](#max_active_dims-is-saved-with-the-model-v620)); `fit()` trains loss parameters and schedules over all objectives ([details](#fit-trains-loss-parameters-and-schedules-over-all-objectives-v620)); batch samplers use `args.seed` ([details](#batch-samplers-are-seeded-with-argsseed-and-resample-short-epochs-v620)); `(n, 1)` labels and `MatryoshkaLoss` token embeddings; `TripletEvaluator` metric key with only `main_similarity_function` ([details](#tripletevaluatormain_similarity_function-evaluates-that-function-which-changes-the-metric-key-v620)); half-precision mean pooling; ranking-loss, evaluator, `community_detection`, `paraphrase_mining` and `mine_hard_negatives` fixes.
+- Fixed: `encode(output_value=None)` with more than four inputs, broken since v5.4.0 ([details](#encodeoutput_valuenone-fails-for-batches-of-five-or-more-inputs-v540)).
+- Device handling: a `device_map` or Accelerate-dispatched model ignores per-call `device=` ([details](#new-warnings-and-device-handling-when-loading-v620)); new warning for half-precision models on CPU; evaluators share DDP inference ([details](#evaluators-share-ddp-inference-during-training-v620)).
+- Additive: `merge()` on all four model types, Hub revisions resolved once per load (huggingface-hub 1.26+ per the notes), experimental `CrossEncoder(keep_in_fp32_modules=...)`, documented fractional `pool_factor`, `SoftmaxLoss` probability targets, `clear_placement_cache()`.
+- No deprecated API was removed, and no module file was removed or renamed.
+- **Notes vs. code:** #3890 is titled "[`v6.1`] Resolve Hub revisions before model loading" and was merged before v6.1.0 was released, but its code first ships in v6.2.0. The "All Changes" list links #4131 (paraphrase mining `top_k` across corpus chunks), which GitHub returns as not found; that change is in the v6.2.0 `util/retrieval.py`. The notes' feature and bug-fix sections do not mention the `encode(output_value=None)` fix (#4170), the `fit()` changes (#4066, #4225), the `TripletEvaluator` metric key (#4088), the `apply_softmax` change for `predict` (#4123), that saved `config.json` files now contain `use_cache: false`, or that huggingface-hub 2.x removes `httpx`; they appear only in "All Changes" or not at all.
 
 ## Quick Reference: most likely breakage points when upgrading from v5.1.2
 
@@ -2602,7 +2907,7 @@ Roughly in order of how many v5.1.2 programs they affect.
 | 10 | `ModuleNotFoundError: No module named 'sentence_transformers.base'` (server on v5.3 or older) or `... 'sentence_transformers.base.modules.normalize'` (v5.4 to v5.7 loading a v6 save) | New save format | v5.4.0, v6.0.0 | [Pin the same version everywhere](#models-saved-by-v540-or-later-cannot-be-loaded-by-v53x-or-earlier-v540) |
 | 11 | CrossEncoder `set_activation_fn`, `model(**tokens)`, `save(max_shard_size=...)` or `push_to_hub(tags=...)` fail | Modular CrossEncoder | v5.4.0 | [CrossEncoder](#crossencoder) |
 | 12 | `rank()` scores are floats; `.item()` fails | Python floats | v6.0.0 | [Use the value directly](#rank-returns-python-floats-v600) |
-| 13 | Training results differ with the same script | `TripletLoss` default distance fixed, `AdaptiveLayerLoss` layers and weights, `GroupByLabelBatchSampler`, cached-loss gradient fixes, merged forward pass | v5.2.0 – v6.0.0 | [Losses](#losses), [Training](#training) |
+| 13 | Training results differ with the same script | `TripletLoss` default distance fixed, `AdaptiveLayerLoss` layers and weights, `GroupByLabelBatchSampler`, cached-loss gradient fixes, merged forward pass; sampler seeding, `fit()` training loss parameters, `(n, 1)` labels | v5.2.0 – v6.2.0 | [Losses](#losses), [Training](#training) |
 | 14 | Stored int8 indexes no longer match new queries | int8 clip-and-floor; multi-process quantization | v5.7.0, v6.0.0 | [Re-quantize](#int8uint8-quantization-saturates-and-floors-binary-quantization-packs-per-embedding-v570) |
 | 15 | Similarity scores are float32 for fp16/bf16 embeddings; top-k ties resolve differently | Higher-precision scoring | v6.0.0 | [Cast back if needed](#scores-are-computed-in-float32-for-half-precision-embeddings-v600) |
 | 16 | `ModuleNotFoundError` for `sentence_transformers.fit_mixin` or `model_card_templates`; `DeprecationWarning` for `sentence_transformers.models` | Package restructure | v5.4.0 | [New import paths](#import-paths-moved-old-paths-still-work-with-a-deprecationwarning-v540) |
@@ -2610,3 +2915,5 @@ Roughly in order of how many v5.1.2 programs they affect.
 | 18 | `ValueError: Column 'score' doesn't exist.` (or `KeyError: 'score'` on row access) after `mine_hard_negatives(..., output_format="n-tuple-scores")` | Column renamed `scores` | v5.2.0 | [Use `scores`](#mine_hard_negatives-n-tuple-scores-is-deprecated-and-its-column-is-renamed-v520) |
 | 19 | `load_best_model_at_end` silently keeps the last checkpoint | Trainer reload refuses plain `nn.Module` custom modules | v6.0.0 | [Trust or subclass `Module`](#trainer-checkpoint-reload-of-custom-modules-v600) |
 | 20 | `model.compile()` now fails or is slow on the first `encode()` | Compilation takes effect | v5.7.0 | [Drop or configure it](#modelcompile-takes-effect-and-forward-hooks-fire-during-inference-v570) |
+| 21 | `ValueError: Cannot compute int8 quantization ranges from a single embedding. ...` from `encode(..., precision="int8")` | Single-embedding calibration refused | v6.2.0 | [Pass `ranges` or `calibration_embeddings`](#int8uint8-quantization-of-a-single-embedding-raises-without-calibration-v620) |
+| 22 | `ModuleNotFoundError: No module named 'httpx'`, or `http_get` errors escape `except httpx.HTTPStatusError` | huggingface-hub 2.x uses `httpx2` | v6.2.0 | [Use `huggingface_hub.utils.httpx` or pin hub <2](#huggingface-hub-2x-is-allowed-and-brings-httpx2-instead-of-httpx-v620) |
